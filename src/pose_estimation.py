@@ -17,9 +17,9 @@ def extract_landmarks(image_bgr, visualize=False):
     with mp_pose.Pose(
         static_image_mode=True,
         model_complexity=2,
-        enable_segmentation=False,
-        min_detection_confidence=0.9,
-        min_tracking_confidence=0.9
+        enable_segmentation=True,
+        min_detection_confidence=0.6,
+        min_tracking_confidence=0.6
     ) as pose_detector:
         results = pose_detector.process(image_rgb)
 
