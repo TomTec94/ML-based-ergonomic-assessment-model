@@ -1,27 +1,16 @@
 # rule_based_model.py
-"""
-Refactored to allow adjustable targets and tolerances for each angle,
-so users can tailor the system for different ergonomic requirements.
+import logging
 
-Example usage:
-    from rule_based_model import update_angle_config, rule_based_posture_analysis
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-    # Update the knee angle to 90° ± 10° tolerance
-    update_angle_config('knee_angle', new_target=90, new_tolerance=10)
-
-    # Then call rule_based_posture_analysis(...) as usual
-"""
-
-###############################################################################
-# 1) CONFIG DICTIONARY WITH PER-ANGLE TARGET AND TOLERANCE
-###############################################################################
+# Configuration dictionary for angle targets and tolerances.
 ANGLE_CONFIG = {
     'knee_angle': {
         'description': "Knee angle",
-        'target': 100,       # Default target angle in degrees
-        'tolerance': 5,      # ± tolerance around the target
+        'target': 100,       # Target angle in degrees
+        'tolerance': 5,      # Allowed deviation in degrees
         'solutions': [
-            "Lower or raise your seat so the knee is at ~100"
+            "Lower or raise your seat so that the knee is around 100°."
         ]
     },
     'hip_angle': {
@@ -29,7 +18,7 @@ ANGLE_CONFIG = {
         'target': 100,
         'tolerance': 5,
         'solutions': [
-            "Adjust seat depth or desk height to achieve ~100° at hips"
+            "Adjust seat depth or desk height to achieve approximately 100° at the hips."
         ]
     },
     'elbow_angle': {
@@ -37,7 +26,7 @@ ANGLE_CONFIG = {
         'target': 95,
         'tolerance': 5,
         'solutions': [
-            "Raise or lower armrests so elbows are about 95°"
+            "Adjust the armrest height so that your elbows are about 95°."
         ]
     },
     'head_to_shoulder_angle': {
@@ -45,54 +34,28 @@ ANGLE_CONFIG = {
         'target': 160,
         'tolerance': 5,
         'solutions': [
-            "Raise or lower your monitor to reduce neck bending",
-            "Keep your head upright; adjust screen distance"
+            "Raise or lower your monitor to reduce neck bending.",
+            "Keep your head upright; adjust the screen distance."
         ]
     }
 }
 
-
 def update_angle_config(angle_name, new_target=None, new_tolerance=None):
     """
     Dynamically updates the target and/or tolerance for a given angle.
-    If 'new_target' or 'new_tolerance' is None, that value is left unchanged.
-
-    :param angle_name: string key (e.g. 'knee_angle', 'hip_angle')
-    :param new_target: new desired target angle (int or float) or None
-    :param new_tolerance: new desired tolerance (int or float) or None
     """
     if angle_name not in ANGLE_CONFIG:
-        print(f"[Warning] '{angle_name}' not found in ANGLE_CONFIG.")
+        logging.warning(f"'{angle_name}' not found in ANGLE_CONFIG.")
         return
-
     if new_target is not None:
         ANGLE_CONFIG[angle_name]['target'] = new_target
-
     if new_tolerance is not None:
         ANGLE_CONFIG[angle_name]['tolerance'] = new_tolerance
 
-
-###############################################################################
-# 2) CORE EVALUATION LOGIC
-###############################################################################
 def evaluate_angle(angle_name, angle_value):
     """
-    Checks if 'angle_value' lies within ±tolerance of the recommended target
-    for 'angle_name'.
-
-    Returns a dict:
-      {
-        'angle_name': angle_name,
-        'ok': bool,
-        'diff': float,
-        'message': str,
-        'solutions': [...]
-      }
-
-    'ok' indicates whether the angle is considered 'good'.
-    'diff' is how many degrees difference from the target value.
-    'message' is a user-friendly summary.
-    'solutions' suggests possible actions if 'ok' is False.
+    Checks whether angle_value is within the acceptable range for angle_name.
+    Returns a dictionary with evaluation details.
     """
     rec = ANGLE_CONFIG.get(angle_name)
     if not rec:
@@ -118,10 +81,8 @@ def evaluate_angle(angle_name, angle_value):
             'solutions': []
         }
     else:
-        msg = (
-            f"{rec['description']} is out of range by {diff:.1f}° "
-            f"(measured {angle_value:.1f}°, target ~{target}° ±{tolerance})."
-        )
+        msg = (f"{rec['description']} is out of range by {diff:.1f}° "
+               f"(measured {angle_value:.1f}°, target ~{target}° ±{tolerance}).")
         return {
             'angle_name': angle_name,
             'ok': False,
@@ -130,17 +91,10 @@ def evaluate_angle(angle_name, angle_value):
             'solutions': rec['solutions']
         }
 
-
 def compute_overall_score(evaluations):
     """
-    Simple scoring:
-      - 0 angles out of range => 100%
-      - 1 => 80%
-      - 2 => 60%
-      - 3 => 40%
-      - 4 or more => 20%
-
-    Returns (score, rating_str)
+    Computes an overall score based on the number of angles out-of-range.
+    Returns a tuple (score, rating_str).
     """
     total = len(evaluations)
     if total == 0:
@@ -168,43 +122,24 @@ def compute_overall_score(evaluations):
 
     return score, rating
 
-
 def rule_based_posture_analysis(image_bgr, angles_dict, side='left', landmarks_dict=None):
     """
-    Evaluate the measured angles in 'angles_dict' using the threshold-based approach,
-    then compute an overall score for the posture.
-
-    :param image_bgr: The original image (not directly used for classification, but kept if needed)
-    :param angles_dict: Dict of { 'knee_angle': val, 'hip_angle': val, 'elbow_angle': val, ... }
-    :param side: e.g., 'left' or 'right', not strictly used here but could influence certain logic
-    :param landmarks_dict: optional, if needed for additional context
-
-    :return: A dict containing:
-        {
-            'evaluations': [ ... ],
-            'score': int,
-            'rating': str,
-            'messages': [ ... ]
-        }
+    Evaluates the measured angles and computes an overall posture score.
+    Returns a dictionary containing detailed evaluations and the overall score.
     """
-    # 1) Evaluate each angle
     evaluations = []
     for angle_name, angle_val in angles_dict.items():
         if angle_val is not None:
             result = evaluate_angle(angle_name, angle_val)
             evaluations.append(result)
 
-    # 2) Compute overall score
     score, rating = compute_overall_score(evaluations)
-
-    # 3) Summarize messages
     messages = []
     for ev in evaluations:
         messages.append(ev['message'])
         if ev['ok'] is False:
-            # if an angle is out of range, we also mention possible solutions
             for sol in ev['solutions']:
-                messages.append(f"Try:\n  {sol}")
+                messages.append(f"Try: {sol}")
 
     summary = f"Overall Score: {score}%, rated {rating}"
     messages.append(summary)

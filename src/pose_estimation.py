@@ -1,17 +1,19 @@
 # pose_estimation.py
-
 import cv2
 import mediapipe as mp
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 mp_pose = mp.solutions.pose
 
 def extract_landmarks(image_bgr, visualize=False):
     """
-    Runs MediaPipe Pose, returns:
-      - all_landmarks: dict {id: (x, y)} for all recognized points
-      - annotated_img: same image (unmodified) if visualize=False
-      - feedback: text summary
-    We skip the default drawing of all 33 points to keep it minimal.
+    Runs MediaPipe Pose on image_bgr.
+    Returns:
+      - all_landmarks: dict mapping landmark id to (x, y)
+      - annotated_img: the original image (unchanged if visualize=False)
+      - feedback: a summary message (e.g., chosen side)
     """
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     with mp_pose.Pose(
@@ -24,14 +26,12 @@ def extract_landmarks(image_bgr, visualize=False):
         results = pose_detector.process(image_rgb)
 
     if not results.pose_landmarks:
+        logging.error("No landmarks detected.")
         return None, image_bgr, "No landmarks detected."
 
-    # Convert raw 33 landmarks to a dictionary of normalized coords
     all_landmarks = {}
     for idx, lm in enumerate(results.pose_landmarks.landmark):
         all_landmarks[idx] = (lm.x, lm.y)
 
-    # For demonstration, let's say the side is "left" by default:
-    feedback = "Chosen side: LEFT\n(You can add coverage logic here.)"
-
+    feedback = "Chosen side: LEFT"  # This may be updated later with a proper side detection
     return all_landmarks, image_bgr, feedback
