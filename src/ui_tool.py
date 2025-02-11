@@ -3,25 +3,35 @@ import os
 import cv2
 import numpy as np
 import math
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 import tkinter as tk
-from tkinter import scrolledtext
 import logging
+import traceback
 
 from tkinterdnd2 import TkinterDnD, DND_FILES
 
 from pose_estimation import extract_landmarks
 from angle_calculation import compute_posture_angles
-from rule_based_model import rule_based_posture_analysis, evaluate_angle
+from rule_based_model import rule_based_posture_analysis, evaluate_angle, ANGLE_CONFIG, update_angle_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
+def get_scale_factor(image_width, image_height, base_width=800.0, base_height=800.0):
+    """
+    Computes a uniform scaling factor based on the image dimensions.
+    Uses the minimum of width and height ratios.
+    """
+    return min(image_width / base_width, image_height / base_height)
+
+
 def draw_relevant_landmarks_and_lines(image_bgr, landmarks_dict, side='left'):
     """
-    Draw green circles and cyan lines for key landmarks.
+    Draws green circles and cyan lines for the detected landmarks.
+    The sizes are scaled based on the image dimensions.
     """
     h, w, _ = image_bgr.shape
+    scale = get_scale_factor(w, h)
 
     if side == 'left':
         hip_id, knee_id, ankle_id = 23, 25, 27
@@ -32,40 +42,56 @@ def draw_relevant_landmarks_and_lines(image_bgr, landmarks_dict, side='left'):
         shoulder_id, elbow_id, wrist_id = 12, 14, 16
         ear_id = 8
 
-    relevant_ids = [hip_id, knee_id, ankle_id, shoulder_id, elbow_id, wrist_id, ear_id]
-    lines = [
-        (hip_id, knee_id),
-        (knee_id, ankle_id),
-        (shoulder_id, hip_id),
-        (shoulder_id, elbow_id),
-        (elbow_id, wrist_id),
-        (ear_id, shoulder_id)
-    ]
+    circle_radius = max(1, int(5 * scale))
+    line_thickness = max(1, int(2 * scale))
 
-    for lid in relevant_ids:
+    for lid in [hip_id, knee_id, ankle_id, shoulder_id, elbow_id, wrist_id, ear_id]:
         if lid in landmarks_dict:
-            x_norm, y_norm = landmarks_dict[lid]
-            x_px, y_px = int(x_norm * w), int(y_norm * h)
-            cv2.circle(image_bgr, (x_px, y_px), 5, (0, 255, 0), -1)
+            x_px = int(landmarks_dict[lid][0] * w)
+            y_px = int(landmarks_dict[lid][1] * h)
+            cv2.circle(image_bgr, (x_px, y_px), circle_radius, (0, 255, 0), -1)
 
-    for (id1, id2) in lines:
-        if id1 in landmarks_dict and id2 in landmarks_dict:
-            x1n, y1n = landmarks_dict[id1]
-            x2n, y2n = landmarks_dict[id2]
-            x1, y1 = int(x1n * w), int(y1n * h)
-            x2, y2 = int(x2n * w), int(y2n * h)
-            cv2.line(image_bgr, (x1, y1), (x2, y2), (255, 255, 0), 2)
+    for (p1, p2) in [(hip_id, knee_id), (knee_id, ankle_id),
+                     (shoulder_id, hip_id), (shoulder_id, elbow_id),
+                     (elbow_id, wrist_id), (ear_id, shoulder_id)]:
+        if p1 in landmarks_dict and p2 in landmarks_dict:
+            x1 = int(landmarks_dict[p1][0] * w)
+            y1 = int(landmarks_dict[p1][1] * h)
+            x2 = int(landmarks_dict[p2][0] * w)
+            y2 = int(landmarks_dict[p2][1] * h)
+            cv2.line(image_bgr, (x1, y1), (x2, y2), (255, 255, 0), line_thickness)
+
+
+def get_arc_angles(vertex, pointA, pointC):
+    """
+    Computes the start and end angles (in degrees) for an arc drawn at 'vertex'
+    that spans from pointA to pointC.
+    """
+    dxA = pointA[0] - vertex[0]
+    dyA = pointA[1] - vertex[1]
+    dxC = pointC[0] - vertex[0]
+    dyC = pointC[1] - vertex[1]
+    angleA = math.degrees(math.atan2(dyA, dxA)) % 360
+    angleC = math.degrees(math.atan2(dyC, dxC)) % 360
+    diff = (angleC - angleA) % 360
+    if diff > 180:
+        diff = 360 - diff
+        start_angle = angleC
+        end_angle = angleA
+    else:
+        start_angle = angleA
+        end_angle = angleC
+    return start_angle, end_angle
 
 
 def overlay_color_coded_angles(image_bgr, landmarks_dict, angles_dict, side='left'):
     """
-    Overlays text labels for the measured angles (knee, hip, elbow, head-to-shoulder)
-    on the image using a single overlay so that all labels remain visible.
-
-    Additionally, for each angle an arc (drawn in yellow) is placed between the two landmark segments
-    (the "Schenkel") to indicate the angle. The text now also uses the Unicode degree symbol (\u00B0).
+    Overlays angle labels (with a proper Unicode degree symbol) and draws a yellow arc
+    that spans exactly from one landmark segment to the other.
+    All drawing parameters are scaled based on the image dimensions.
     """
     h, w, _ = image_bgr.shape
+    scale = get_scale_factor(w, h)
 
     if side == 'left':
         hip_id, knee_id, ankle_id = 23, 25, 27
@@ -80,37 +106,44 @@ def overlay_color_coded_angles(image_bgr, landmarks_dict, angles_dict, side='lef
         'knee_angle': 'Knee angle',
         'hip_angle': 'Hip angle',
         'elbow_angle': 'Elbow angle',
-        'head_to_shoulder_angle': 'Head-to-Shoulder angle'
+        'head_to_shoulder_angle': 'Neck angle'
     }
-    # The triple for each angle: (pointA, vertex, pointC)
     angle_map = {
-        'knee_angle': (hip_id, knee_id, ankle_id),  # Vertex = knee
-        'hip_angle': (shoulder_id, hip_id, knee_id),  # Vertex = hip
-        'elbow_angle': (shoulder_id, elbow_id, wrist_id),  # Vertex = elbow
-        'head_to_shoulder_angle': (ear_id, shoulder_id, hip_id)  # Vertex = shoulder
+        'knee_angle': (hip_id, knee_id, ankle_id),           # vertex = knee
+        'hip_angle': (shoulder_id, hip_id, knee_id),            # vertex = hip
+        'elbow_angle': (shoulder_id, elbow_id, wrist_id),       # vertex = elbow
+        'head_to_shoulder_angle': (ear_id, shoulder_id, hip_id)   # vertex = shoulder (used as neck)
     }
-    # Custom offsets for text placement near the vertex
     offset_map = {
-        'knee_angle': (10, 15),
-        'hip_angle': (10, -15),
-        'elbow_angle': (10, 15),
-        'head_to_shoulder_angle': (10, -15)
+        'knee_angle': (10 * scale, 15 * scale),
+        'hip_angle': (10 * scale, -15 * scale),
+        'elbow_angle': (10 * scale, 15 * scale),
+        'head_to_shoulder_angle': (10 * scale, -15 * scale)
     }
 
-    # Create one overlay image for all annotations.
+    circle_radius = max(1, int(5 * scale))
+    line_thickness = max(1, int(2 * scale))
+    arc_radius = max(1, int(20 * scale))
+    # Increase the base font size to 20 and clamp to a minimum of 20 points.
+    font_size = max(20, int(20 * scale))
+
     overlay = image_bgr.copy()
+
+    # Convert overlay to a PIL image for text drawing.
+    overlay_pil = Image.fromarray(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(overlay_pil)
+    # Try to load a bold font.
+    try:
+        font = ImageFont.truetype("arialbd.ttf", font_size)
+    except IOError:
+        font = ImageFont.truetype("arial.ttf", font_size) if os.path.exists("arial.ttf") else ImageFont.load_default()
 
     for angle_name, angle_val in angles_dict.items():
         if angle_val is None:
             continue
-
         eval_info = evaluate_angle(angle_name, angle_val)
-        color_text = (0, 255, 0) if eval_info['ok'] else (0, 0, 255)
-
-        label_str = label_map.get(angle_name, angle_name)
-        # Use Unicode degree symbol \u00B0 so it displays correctly
-        text_str = f"{label_str} = {angle_val:.1f}\u00B0"
-
+        color_text = (0, 255, 0) if eval_info['ok'] else (255, 0, 0)
+        text_str = f"{label_map.get(angle_name, angle_name)} = {angle_val:.1f}{chr(176)}"
         triple = angle_map.get(angle_name)
         if not triple:
             continue
@@ -118,66 +151,29 @@ def overlay_color_coded_angles(image_bgr, landmarks_dict, angles_dict, side='lef
         _, vertex_id, _ = triple
         if vertex_id not in landmarks_dict:
             continue
-
         bx, by = landmarks_dict[vertex_id]
         bx_px, by_px = int(bx * w), int(by * h)
-        offset = offset_map.get(angle_name, (10, 10))
-        offset_x, offset_y = offset
+        offset = offset_map.get(angle_name, (10 * scale, 10 * scale))
+        pos = (bx_px + offset[0], by_px + offset[1])
+        bbox = draw.textbbox((0, 0), text_str, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        # Draw a white rectangle as background with full opacity.
+        draw.rectangle([pos, (pos[0] + text_width + 4, pos[1] + text_height + 4)], fill="white")
+        # Draw bold text.
+        draw.text((pos[0] + 2, pos[1] + 2), text_str, font=font, fill=color_text)
 
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        scale = 0.6
-        thickness = 2
-        (tw, th), base = cv2.getTextSize(text_str, font, scale, thickness)
-        base += 4
-
-        rect_left = bx_px + offset_x
-        rect_top = by_px + offset_y - th
-        rect_right = rect_left + tw
-        rect_bottom = rect_top + th + base
-
-        rect_left = max(rect_left, 0)
-        rect_top = max(rect_top, 0)
-        rect_right = min(rect_right, w)
-        rect_bottom = min(rect_bottom, h)
-
-        cv2.rectangle(overlay, (rect_left, rect_top), (rect_right, rect_bottom), (255, 255, 255), -1)
-        text_x = rect_left
-        text_y = rect_bottom - base // 2
-        cv2.putText(overlay, text_str, (text_x, text_y), font, scale, color_text, thickness, cv2.LINE_AA)
-
-        # --- Draw the arc indicating the angle ---
-        # Get the two endpoints from the triple:
+        # Draw the arc spanning from one landmark segment to the other.
         pointA = landmarks_dict.get(triple[0])
         pointC = landmarks_dict.get(triple[2])
         if pointA is None or pointC is None:
             continue
-        ax_px, ay_px = int(pointA[0] * w), int(pointA[1] * h)
-        cx_px, cy_px = int(pointC[0] * w), int(pointC[1] * h)
-
-        # Define a helper function to compute arc start and end angles.
-        def get_arc_angles(vertex, pointA, pointC):
-            dxA = pointA[0] - vertex[0]
-            dyA = pointA[1] - vertex[1]
-            dxC = pointC[0] - vertex[0]
-            dyC = pointC[1] - vertex[1]
-            angleA = math.degrees(math.atan2(dyA, dxA))
-            angleC = math.degrees(math.atan2(dyC, dxC))
-            if angleA < 0:
-                angleA += 360
-            if angleC < 0:
-                angleC += 360
-            diff = abs(angleA - angleC)
-            if diff > 180:
-                diff = 360 - diff
-            start = min(angleA, angleC)
-            return start, start + diff
-
         start_angle, end_angle = get_arc_angles((bx, by), pointA, pointC)
-        r = 20  # fixed radius for the arc
-        cv2.ellipse(overlay, (bx_px, by_px), (r, r), 0, start_angle, end_angle, (0, 255, 255), 2)
+        cv2.ellipse(overlay, (bx_px, by_px), (arc_radius, arc_radius), 0, start_angle, end_angle, (0, 255, 255), line_thickness)
 
-    alpha = 0.5
-    cv2.addWeighted(overlay, alpha, image_bgr, 1 - alpha, 0, image_bgr)
+    overlay_cv2 = cv2.cvtColor(np.array(overlay_pil), cv2.COLOR_RGB2BGR)
+    # Blend the text overlay more strongly to preserve the white background.
+    cv2.addWeighted(overlay_cv2, 0.8, overlay, 0.2, 0, image_bgr)
 
 
 def format_results_text(base_name, side_used, angles_dict, results, landmarks_dict):
@@ -185,7 +181,6 @@ def format_results_text(base_name, side_used, angles_dict, results, landmarks_di
     Builds a textual summary of the analysis.
     """
     landmarks_count = len(landmarks_dict) if landmarks_dict else 0
-
     lines = []
     lines.append("-----------------------------------")
     lines.append(f"File Name: {base_name}")
@@ -194,16 +189,15 @@ def format_results_text(base_name, side_used, angles_dict, results, landmarks_di
     lines.append("Detected Angles:")
     for angle_name, angle_val in angles_dict.items():
         if angle_val is not None:
-            lines.append(f"  - {angle_name}: {angle_val:.1f}\u00B0")
+            lines.append(f"  - {angle_name}: {angle_val:.1f}{chr(176)}")
     score = results.get('score', 0)
     rating = results.get('rating', "N/A")
     lines.append("")
     lines.append(f"SCORE: {score}% ({rating})\n")
     lines.append("Result Details:")
-    evaluations = results.get('evaluations', [])
-    for ev in evaluations:
+    for ev in results.get('evaluations', []):
         lines.append(f"  - {ev['message']}")
-        if ev['ok'] is False and ev['solutions']:
+        if not ev['ok'] and ev.get('solutions'):
             for sol in ev['solutions']:
                 lines.append(f"      * {sol}")
     lines.append("-----------------------------------\n")
@@ -214,40 +208,97 @@ class ErgoApp(TkinterDnD.Tk):
     """
     A TkinterDnD-based GUI for posture detection.
     """
-
     def __init__(self):
         super().__init__()
         self.title("ErgoApp: Posture Detection")
-        self.geometry("1200x800")
+        self.geometry("1200x900")
 
-        # Left side: annotated image
-        self.frame_left = tk.Frame(self, width=800, height=800, bg="gray")
-        self.frame_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        # Right side: text results and drop area
-        self.frame_right = tk.Frame(self, width=400, height=800)
+        # Create right frame with two subframes: one for threshold adjustments and one for drop/results.
+        self.frame_right = tk.Frame(self, width=400)
         self.frame_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        self.image_label = tk.Label(self.frame_left, bg="black")
-        self.image_label.pack(fill=tk.BOTH, expand=True)
+        # Adjustment frame for threshold inputs.
+        self.adjustment_frame = tk.Frame(self.frame_right, bd=2, relief=tk.GROOVE)
+        self.adjustment_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        self._create_adjustment_form()
 
-        self.info_label = tk.Label(self.frame_right, text="Drag an Image File onto the Drop Area:", font=("Arial", 14))
-        self.info_label.pack(pady=10)
-
-        self.drop_label = tk.Label(self.frame_right, text="DROP HERE", bg="#ccc", width=40, height=6,
-                                   font=("Arial", 16))
-        self.drop_label.pack(pady=20, fill=tk.X)
-
+        # Drop area frame.
+        self.drop_frame = tk.Frame(self.frame_right)
+        self.drop_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        self.drop_label = tk.Label(self.drop_frame, text="DROP HERE", bg="#ccc", width=40, height=3, font=("Arial", 16))
+        self.drop_label.pack(pady=5, fill=tk.X)
         self.drop_label.drop_target_register(DND_FILES)
         self.drop_label.dnd_bind('<<Drop>>', self.drop_event)
 
-        self.scrollbar = tk.Scrollbar(self.frame_right, orient=tk.VERTICAL)
-        self.result_text = tk.Text(self.frame_right, wrap="word", font=("Arial", 14), yscrollcommand=self.scrollbar.set)
+        # Text result frame.
+        self.result_frame = tk.Frame(self.frame_right)
+        self.result_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.scrollbar = tk.Scrollbar(self.result_frame, orient=tk.VERTICAL)
+        self.result_text = tk.Text(self.result_frame, wrap=tk.WORD, font=("Arial", 14), yscrollcommand=self.scrollbar.set)
         self.scrollbar.config(command=self.result_text.yview)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.result_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # Left frame for annotated image.
+        self.frame_left = tk.Frame(self, width=800, height=900, bg="gray")
+        self.frame_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.image_label = tk.Label(self.frame_left, bg="black")
+        self.image_label.pack(fill=tk.BOTH, expand=True)
+
         self.annotated_cv2_image = None
+        self.current_file_path = None
+
+    def _create_adjustment_form(self):
+        """
+        Creates the adjustment form for modifying threshold values.
+        """
+        title_label = tk.Label(self.adjustment_frame, text="Threshold Adjustments", font=("Arial", 14, "bold"))
+        title_label.grid(row=0, column=0, columnspan=5, pady=(2, 10))
+
+        self.angle_keys = ['knee_angle', 'hip_angle', 'elbow_angle', 'head_to_shoulder_angle']
+        self.threshold_entries = {}
+
+        for i, angle_key in enumerate(self.angle_keys, start=1):
+            display_name = "Neck angle" if angle_key == 'head_to_shoulder_angle' else angle_key.replace("_", " ").title()
+            label = tk.Label(self.adjustment_frame, text=display_name + ":", font=("Arial", 12))
+            label.grid(row=i, column=0, padx=5, pady=2, sticky=tk.W)
+
+            target_val = ANGLE_CONFIG[angle_key]['target']
+            target_entry = tk.Entry(self.adjustment_frame, width=5, font=("Arial", 12))
+            target_entry.insert(0, str(target_val))
+            target_entry.grid(row=i, column=1, padx=5, pady=2)
+            target_label = tk.Label(self.adjustment_frame, text="Target", font=("Arial", 10))
+            target_label.grid(row=i, column=2, padx=2, pady=2, sticky=tk.W)
+
+            tol_val = ANGLE_CONFIG[angle_key]['tolerance']
+            tol_entry = tk.Entry(self.adjustment_frame, width=5, font=("Arial", 12))
+            tol_entry.insert(0, str(tol_val))
+            tol_entry.grid(row=i, column=3, padx=5, pady=2)
+            tol_label = tk.Label(self.adjustment_frame, text="Tolerance", font=("Arial", 10))
+            tol_label.grid(row=i, column=4, padx=2, pady=2, sticky=tk.W)
+
+            self.threshold_entries[angle_key] = {"target": target_entry, "tolerance": tol_entry}
+
+        apply_btn = tk.Button(self.adjustment_frame, text="Apply", font=("Arial", 12, "bold"),
+                                command=self.apply_thresholds)
+        apply_btn.grid(row=len(self.angle_keys) + 1, column=0, columnspan=5, pady=10)
+
+    def apply_thresholds(self):
+        """
+        Reads values from the adjustment form, updates the ANGLE_CONFIG for the current session,
+        and reprocesses the current image (if any).
+        """
+        for angle_key in self.angle_keys:
+            try:
+                new_target = float(self.threshold_entries[angle_key]["target"].get())
+                new_tolerance = float(self.threshold_entries[angle_key]["tolerance"].get())
+                update_angle_config(angle_key, new_target=new_target, new_tolerance=new_tolerance)
+                self.log_message(f"Updated {angle_key}: Target={new_target}, Tolerance={new_tolerance}")
+            except ValueError:
+                self.log_message(f"Invalid input for {angle_key}. Please enter numeric values.")
+        if self.current_file_path:
+            self.log_message("Reprocessing current image with new thresholds...")
+            self.load_and_process_image(self.current_file_path)
 
     def drop_event(self, event):
         paths = self.parse_drop_files(event.data)
@@ -255,6 +306,7 @@ class ErgoApp(TkinterDnD.Tk):
             self.log_message("No valid file dropped.")
             return
         file_path = paths[0]
+        self.current_file_path = file_path
         self.log_message(f"Dropped file: {file_path}")
         if not os.path.isfile(file_path):
             self.log_message(f"Not a valid file: {file_path}")
@@ -271,49 +323,67 @@ class ErgoApp(TkinterDnD.Tk):
         return file_list
 
     def load_and_process_image(self, file_path):
+        self.log_message(f"Processing file: {file_path}")
         if not os.path.exists(file_path):
             self.log_message(f"File not found: {file_path}")
             return
 
-        # Try loading the image with OpenCV
         image_bgr = cv2.imread(file_path)
         if image_bgr is None:
             self.log_message(f"OpenCV could not open the image: {file_path}. Attempting to open with PIL...")
             try:
                 pil_image = Image.open(file_path)
                 image_bgr = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+                self.log_message("Image loaded via PIL.")
             except Exception as e:
                 self.log_message(f"Failed to open image via PIL: {e}")
                 return
+        else:
+            self.log_message("Image loaded successfully via OpenCV.")
 
-        # Run pose detection
-        landmarks_dict, _, feedback_msg = extract_landmarks(image_bgr, visualize=False)
-        if landmarks_dict is None:
+        # Resize image to a maximum of 800x800 if needed.
+        MAX_SIZE = (800, 800)
+        h, w, _ = image_bgr.shape
+        if w > MAX_SIZE[0] or h > MAX_SIZE[1]:
+            scale_factor = min(MAX_SIZE[0] / w, MAX_SIZE[1] / h)
+            new_w = int(w * scale_factor)
+            new_h = int(h * scale_factor)
+            image_bgr = cv2.resize(image_bgr, (new_w, new_h))
+            self.log_message(f"Image resized to {new_w}x{new_h} for processing.")
+
+        try:
+            self.log_message("Running pose detection...")
+            landmarks_dict, _, feedback_msg = extract_landmarks(image_bgr, visualize=False)
+            if landmarks_dict is None:
+                self.log_message("No landmarks found.")
+                self.result_text.delete("1.0", tk.END)
+                self.result_text.insert("1.0", "No landmarks found.\n")
+                return
+            self.log_message("Landmarks extracted successfully.")
+            side_used = "LEFT"
+            if "RIGHT" in feedback_msg.upper():
+                side_used = "RIGHT"
+            self.log_message("Chosen side: " + side_used)
+            angles_dict = compute_posture_angles(landmarks_dict, side=side_used.lower())
+            self.log_message("Angles computed: " + str(angles_dict))
+            final_annot = image_bgr.copy()
+            draw_relevant_landmarks_and_lines(final_annot, landmarks_dict, side=side_used.lower())
+            overlay_color_coded_angles(final_annot, landmarks_dict, angles_dict, side=side_used.lower())
+            self.log_message("Overlay drawn.")
+            results = rule_based_posture_analysis(final_annot, angles_dict, side=side_used.lower(), landmarks_dict=landmarks_dict)
+            self.log_message("Results computed: " + str(results))
+            base_name = os.path.basename(file_path)
+            summary = format_results_text(base_name, side_used, angles_dict, results, landmarks_dict)
+            self.log_message("Summary formatted.")
             self.result_text.delete("1.0", tk.END)
-            self.result_text.insert(tk.END, f"No landmarks found in {file_path}\n")
-            return
-
-        side_used = "LEFT"
-        if "RIGHT" in feedback_msg.upper():
-            side_used = "RIGHT"
-
-        angles_dict = compute_posture_angles(landmarks_dict, side=side_used.lower())
-
-        # Create an annotated copy of the image
-        final_annot = image_bgr.copy()
-        draw_relevant_landmarks_and_lines(final_annot, landmarks_dict, side=side_used.lower())
-        overlay_color_coded_angles(final_annot, landmarks_dict, angles_dict, side=side_used.lower())
-
-        results = rule_based_posture_analysis(final_annot, angles_dict, side=side_used.lower(),
-                                              landmarks_dict=landmarks_dict)
-
-        base_name = os.path.basename(file_path)
-        summary = format_results_text(base_name, side_used, angles_dict, results, landmarks_dict)
-        self.result_text.delete("1.0", tk.END)
-        self.result_text.insert(tk.END, summary)
-
-        self.annotated_cv2_image = final_annot
-        self.display_annotated_image(self.annotated_cv2_image)
+            self.result_text.insert("1.0", summary)
+            self.log_message("Results inserted in text widget.")
+            self.annotated_cv2_image = final_annot
+            self.display_annotated_image(self.annotated_cv2_image)
+            self.log_message("Image displayed.")
+        except Exception as e:
+            self.log_message("Error during processing: " + str(e))
+            self.log_message(traceback.format_exc())
 
     def display_annotated_image(self, cv2_img):
         rgb_img = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
