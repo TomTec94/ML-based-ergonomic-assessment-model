@@ -1,24 +1,23 @@
-# rule_based_model.py
 import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# Configuration dictionary for angle targets and tolerances.
+# Updated Configuration dictionary for angle targets and tolerances.
 ANGLE_CONFIG = {
     'knee_angle': {
         'description': "Knee angle",
-        'target': 100,       # Target angle in degrees
-        'tolerance': 5,      # Allowed deviation in degrees
+        'target': 90,       # Updated target angle in degrees
+        'tolerance': 10,    # Allowed deviation in degrees
         'solutions': [
-            "Lower or raise your seat so that the knee is around 100°."
+            "Lower or raise your seat so that the knee is around 90°."
         ]
     },
     'hip_angle': {
         'description': "Hip angle",
-        'target': 100,
-        'tolerance': 5,
+        'target': 98,
+        'tolerance': 8,
         'solutions': [
-            "Adjust seat depth or desk height to achieve approximately 100° at the hips."
+            "Adjust seat depth or desk height to achieve approximately 98° at the hips."
         ]
     },
     'elbow_angle': {
@@ -32,7 +31,7 @@ ANGLE_CONFIG = {
     'head_to_shoulder_angle': {
         'description': "Head to Shoulder angle",
         'target': 160,
-        'tolerance': 5,
+        'tolerance': 10,
         'solutions': [
             "Raise or lower your monitor to reduce neck bending.",
             "Keep your head upright; adjust the screen distance."
@@ -91,41 +90,18 @@ def evaluate_angle(angle_name, angle_value):
             'solutions': rec['solutions']
         }
 
-def compute_overall_score(evaluations):
-    """
-    Computes an overall score based on the number of angles out-of-range.
-    Returns a tuple (score, rating_str).
-    """
-    total = len(evaluations)
-    if total == 0:
-        return 0, "No angles measured"
-
-    num_out_of_range = sum(1 for ev in evaluations if ev['ok'] is False)
-
-    if num_out_of_range == 0:
-        score = 100
-    elif num_out_of_range == 1:
-        score = 80
-    elif num_out_of_range == 2:
-        score = 60
-    elif num_out_of_range == 3:
-        score = 40
-    else:
-        score = 20
-
-    if score >= 80:
-        rating = "Great"
-    elif score >= 60:
-        rating = "OK"
-    else:
-        rating = "Poor"
-
-    return score, rating
-
 def rule_based_posture_analysis(image_bgr, angles_dict, side='left', landmarks_dict=None):
     """
-    Evaluates the measured angles and computes an overall posture score.
-    Returns a dictionary containing detailed evaluations and the overall score.
+    Evaluates the measured angles and returns evaluation details.
+    Computes an overall assessment as follows:
+      - "Ergonomic" if no angle is out of range.
+      - "Mostly ergonomic" if exactly one angle is out of range.
+      - "Non ergonomic" if two or more angles are out of range.
+
+    Returns a dictionary with:
+      - evaluations: a list of evaluation dictionaries (one per angle)
+      - messages: a list of messages (each evaluation message, plus any solution suggestions)
+      - overall: the overall assessment message.
     """
     evaluations = []
     for angle_name, angle_val in angles_dict.items():
@@ -133,20 +109,26 @@ def rule_based_posture_analysis(image_bgr, angles_dict, side='left', landmarks_d
             result = evaluate_angle(angle_name, angle_val)
             evaluations.append(result)
 
-    score, rating = compute_overall_score(evaluations)
     messages = []
+    out_of_range_count = 0
     for ev in evaluations:
         messages.append(ev['message'])
-        if ev['ok'] is False:
+        if not ev['ok']:
+            out_of_range_count += 1
             for sol in ev['solutions']:
                 messages.append(f"Try: {sol}")
 
-    summary = f"Overall Score: {score}%, rated {rating}"
-    messages.append(summary)
+    if out_of_range_count == 0:
+        overall = "Overall assessment: Ergonomic"
+    elif out_of_range_count == 1:
+        overall = "Overall assessment: Mostly ergonomic"
+    else:
+        overall = "Overall assessment: Non ergonomic"
+
+    messages.append(overall)
 
     return {
         'evaluations': evaluations,
-        'score': score,
-        'rating': rating,
-        'messages': messages
+        'messages': messages,
+        'overall': overall
     }

@@ -1,4 +1,4 @@
-# internal_evaluation.py
+# evaluation.py
 import os
 import cv2
 import logging
@@ -30,7 +30,8 @@ def internal_evaluation(image_dir):
 
         angles_dict = compute_posture_angles(landmarks_dict, side=side_used.lower())
         results = rule_based_posture_analysis(image_bgr, angles_dict, side=side_used.lower(), landmarks_dict=landmarks_dict)
-        logging.info(f"File: {img_file} => Score: {results['score']}%, Rating: {results['rating']}")
+        # Removed overall score printing; now only printing the evaluation messages.
+        logging.info(f"File: {img_file} => Evaluations: {results['messages']}")
 
 if __name__ == "__main__":
     internal_evaluation("../data/raw_images")

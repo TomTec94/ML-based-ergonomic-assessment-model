@@ -1,4 +1,3 @@
-# ui_tool.py
 import os
 import cv2
 import numpy as np
@@ -109,10 +108,10 @@ def overlay_color_coded_angles(image_bgr, landmarks_dict, angles_dict, side='lef
         'head_to_shoulder_angle': 'Neck angle'
     }
     angle_map = {
-        'knee_angle': (hip_id, knee_id, ankle_id),           # vertex = knee
-        'hip_angle': (shoulder_id, hip_id, knee_id),            # vertex = hip
-        'elbow_angle': (shoulder_id, elbow_id, wrist_id),       # vertex = elbow
-        'head_to_shoulder_angle': (ear_id, shoulder_id, hip_id)   # vertex = shoulder (used as neck)
+        'knee_angle': (hip_id, knee_id, ankle_id),  # vertex = knee
+        'hip_angle': (shoulder_id, hip_id, knee_id),  # vertex = hip
+        'elbow_angle': (shoulder_id, elbow_id, wrist_id),  # vertex = elbow
+        'head_to_shoulder_angle': (ear_id, shoulder_id, hip_id)  # vertex = shoulder (used as neck)
     }
     offset_map = {
         'knee_angle': (10 * scale, 15 * scale),
@@ -124,15 +123,11 @@ def overlay_color_coded_angles(image_bgr, landmarks_dict, angles_dict, side='lef
     circle_radius = max(1, int(5 * scale))
     line_thickness = max(1, int(2 * scale))
     arc_radius = max(1, int(20 * scale))
-    # Increase the base font size to 20 and clamp to a minimum of 20 points.
     font_size = max(20, int(20 * scale))
 
     overlay = image_bgr.copy()
-
-    # Convert overlay to a PIL image for text drawing.
     overlay_pil = Image.fromarray(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(overlay_pil)
-    # Try to load a bold font.
     try:
         font = ImageFont.truetype("arialbd.ttf", font_size)
     except IOError:
@@ -147,7 +142,6 @@ def overlay_color_coded_angles(image_bgr, landmarks_dict, angles_dict, side='lef
         triple = angle_map.get(angle_name)
         if not triple:
             continue
-        # Use the vertex from the triple for text placement.
         _, vertex_id, _ = triple
         if vertex_id not in landmarks_dict:
             continue
@@ -158,27 +152,26 @@ def overlay_color_coded_angles(image_bgr, landmarks_dict, angles_dict, side='lef
         bbox = draw.textbbox((0, 0), text_str, font=font)
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
-        # Draw a white rectangle as background with full opacity.
         draw.rectangle([pos, (pos[0] + text_width + 4, pos[1] + text_height + 4)], fill="white")
-        # Draw bold text.
         draw.text((pos[0] + 2, pos[1] + 2), text_str, font=font, fill=color_text)
 
-        # Draw the arc spanning from one landmark segment to the other.
         pointA = landmarks_dict.get(triple[0])
         pointC = landmarks_dict.get(triple[2])
         if pointA is None or pointC is None:
             continue
         start_angle, end_angle = get_arc_angles((bx, by), pointA, pointC)
-        cv2.ellipse(overlay, (bx_px, by_px), (arc_radius, arc_radius), 0, start_angle, end_angle, (0, 255, 255), line_thickness)
+        cv2.ellipse(overlay, (bx_px, by_px), (arc_radius, arc_radius), 0, start_angle, end_angle, (0, 255, 255),
+                    line_thickness)
 
     overlay_cv2 = cv2.cvtColor(np.array(overlay_pil), cv2.COLOR_RGB2BGR)
-    # Blend the text overlay more strongly to preserve the white background.
     cv2.addWeighted(overlay_cv2, 0.8, overlay, 0.2, 0, image_bgr)
 
 
 def format_results_text(base_name, side_used, angles_dict, results, landmarks_dict):
     """
     Builds a textual summary of the analysis.
+    Overall score and rating have been removed.
+    Appends the overall assessment at the bottom.
     """
     landmarks_count = len(landmarks_dict) if landmarks_dict else 0
     lines = []
@@ -186,20 +179,15 @@ def format_results_text(base_name, side_used, angles_dict, results, landmarks_di
     lines.append(f"File Name: {base_name}")
     lines.append(f"Detected Landmarks: {landmarks_count}")
     lines.append(f"Chosen Side: {side_used}\n")
-    lines.append("Detected Angles:")
-    for angle_name, angle_val in angles_dict.items():
-        if angle_val is not None:
-            lines.append(f"  - {angle_name}: {angle_val:.1f}{chr(176)}")
-    score = results.get('score', 0)
-    rating = results.get('rating', "N/A")
-    lines.append("")
-    lines.append(f"SCORE: {score}% ({rating})\n")
-    lines.append("Result Details:")
+    lines.append("Assessment Results:")
     for ev in results.get('evaluations', []):
         lines.append(f"  - {ev['message']}")
         if not ev['ok'] and ev.get('solutions'):
             for sol in ev['solutions']:
                 lines.append(f"      * {sol}")
+    if 'overall' in results:
+        lines.append("")
+        lines.append(results['overall'])
     lines.append("-----------------------------------\n")
     return "\n".join(lines)
 
@@ -208,6 +196,7 @@ class ErgoApp(TkinterDnD.Tk):
     """
     A TkinterDnD-based GUI for posture detection.
     """
+
     def __init__(self):
         super().__init__()
         self.title("ErgoApp: Posture Detection")
@@ -217,7 +206,7 @@ class ErgoApp(TkinterDnD.Tk):
         self.frame_right = tk.Frame(self, width=400)
         self.frame_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # Adjustment frame for threshold inputs.
+        # Adjustment frame for threshold inputs and side selection.
         self.adjustment_frame = tk.Frame(self.frame_right, bd=2, relief=tk.GROOVE)
         self.adjustment_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
         self._create_adjustment_form()
@@ -234,7 +223,8 @@ class ErgoApp(TkinterDnD.Tk):
         self.result_frame = tk.Frame(self.frame_right)
         self.result_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.scrollbar = tk.Scrollbar(self.result_frame, orient=tk.VERTICAL)
-        self.result_text = tk.Text(self.result_frame, wrap=tk.WORD, font=("Arial", 14), yscrollcommand=self.scrollbar.set)
+        self.result_text = tk.Text(self.result_frame, wrap=tk.WORD, font=("Arial", 14),
+                                   yscrollcommand=self.scrollbar.set)
         self.scrollbar.config(command=self.result_text.yview)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.result_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -247,19 +237,32 @@ class ErgoApp(TkinterDnD.Tk):
 
         self.annotated_cv2_image = None
         self.current_file_path = None
+        self.selected_side = None  # This will store the side after clicking "Apply"
 
     def _create_adjustment_form(self):
         """
-        Creates the adjustment form for modifying threshold values.
+        Creates the input fields for side selection and threshold adjustments.
         """
+        # Dropdown for selecting the side from which the image was taken.
+        side_label = tk.Label(self.adjustment_frame, text="Select Image Side:", font=("Arial", 12))
+        side_label.grid(row=0, column=0, columnspan=2, pady=(2, 10), sticky="w")
+        self.side_var = tk.StringVar()
+        # No default value; must be set via "Apply"
+        self.side_dropdown = tk.OptionMenu(self.adjustment_frame, self.side_var, "Left", "Right")
+        self.side_dropdown.config(font=("Arial", 12))
+        self.side_dropdown.grid(row=0, column=2, columnspan=3, padx=5, pady=2, sticky="w")
+
+        # Title label for threshold adjustments.
         title_label = tk.Label(self.adjustment_frame, text="Threshold Adjustments", font=("Arial", 14, "bold"))
-        title_label.grid(row=0, column=0, columnspan=5, pady=(2, 10))
+        title_label.grid(row=1, column=0, columnspan=5, pady=(2, 10))
 
         self.angle_keys = ['knee_angle', 'hip_angle', 'elbow_angle', 'head_to_shoulder_angle']
         self.threshold_entries = {}
 
-        for i, angle_key in enumerate(self.angle_keys, start=1):
-            display_name = "Neck angle" if angle_key == 'head_to_shoulder_angle' else angle_key.replace("_", " ").title()
+        # Threshold entries start at row 2.
+        for i, angle_key in enumerate(self.angle_keys, start=2):
+            display_name = "Neck angle" if angle_key == 'head_to_shoulder_angle' else angle_key.replace("_",
+                                                                                                        " ").title()
             label = tk.Label(self.adjustment_frame, text=display_name + ":", font=("Arial", 12))
             label.grid(row=i, column=0, padx=5, pady=2, sticky=tk.W)
 
@@ -280,14 +283,15 @@ class ErgoApp(TkinterDnD.Tk):
             self.threshold_entries[angle_key] = {"target": target_entry, "tolerance": tol_entry}
 
         apply_btn = tk.Button(self.adjustment_frame, text="Apply", font=("Arial", 12, "bold"),
-                                command=self.apply_thresholds)
-        apply_btn.grid(row=len(self.angle_keys) + 1, column=0, columnspan=5, pady=10)
+                              command=self.apply_thresholds)
+        apply_btn.grid(row=len(self.angle_keys) + 2, column=0, columnspan=5, pady=10)
 
     def apply_thresholds(self):
         """
         Reads values from the adjustment form, updates the ANGLE_CONFIG for the current session,
-        and reprocesses the current image (if any).
+        and updates the side selection based on the dropdown. Then, reprocesses the current image (if any).
         """
+        # Update threshold values.
         for angle_key in self.angle_keys:
             try:
                 new_target = float(self.threshold_entries[angle_key]["target"].get())
@@ -296,8 +300,19 @@ class ErgoApp(TkinterDnD.Tk):
                 self.log_message(f"Updated {angle_key}: Target={new_target}, Tolerance={new_tolerance}")
             except ValueError:
                 self.log_message(f"Invalid input for {angle_key}. Please enter numeric values.")
+
+        # Update side selection from dropdown.
+        selected_side = self.side_var.get()
+        if not selected_side:
+            self.log_message(
+                "Error: No side selected. Please choose 'Left' or 'Right' from the dropdown and click Apply.")
+            return
+        self.selected_side = selected_side.upper()  # Store the selected side (as "LEFT" or "RIGHT")
+        self.log_message("Side selection updated: " + self.selected_side)
+
+        # If an image is already loaded, reprocess it.
         if self.current_file_path:
-            self.log_message("Reprocessing current image with new thresholds...")
+            self.log_message("Reprocessing current image with new thresholds and side selection...")
             self.load_and_process_image(self.current_file_path)
 
     def drop_event(self, event):
@@ -360,9 +375,13 @@ class ErgoApp(TkinterDnD.Tk):
                 self.result_text.insert("1.0", "No landmarks found.\n")
                 return
             self.log_message("Landmarks extracted successfully.")
-            side_used = "LEFT"
-            if "RIGHT" in feedback_msg.upper():
-                side_used = "RIGHT"
+
+            # Use the stored side selection from the Apply button.
+            if not self.selected_side:
+                self.log_message(
+                    "Error: No side has been set. Please select 'Left' or 'Right' and click Apply before processing an image.")
+                return
+            side_used = self.selected_side
             self.log_message("Chosen side: " + side_used)
             angles_dict = compute_posture_angles(landmarks_dict, side=side_used.lower())
             self.log_message("Angles computed: " + str(angles_dict))
@@ -370,17 +389,16 @@ class ErgoApp(TkinterDnD.Tk):
             draw_relevant_landmarks_and_lines(final_annot, landmarks_dict, side=side_used.lower())
             overlay_color_coded_angles(final_annot, landmarks_dict, angles_dict, side=side_used.lower())
             self.log_message("Overlay drawn.")
-            results = rule_based_posture_analysis(final_annot, angles_dict, side=side_used.lower(), landmarks_dict=landmarks_dict)
+            results = rule_based_posture_analysis(final_annot, angles_dict, side=side_used.lower(),
+                                                  landmarks_dict=landmarks_dict)
             self.log_message("Results computed: " + str(results))
             base_name = os.path.basename(file_path)
             summary = format_results_text(base_name, side_used, angles_dict, results, landmarks_dict)
             self.log_message("Summary formatted.")
             self.result_text.delete("1.0", tk.END)
             self.result_text.insert("1.0", summary)
-            self.log_message("Results inserted in text widget.")
             self.annotated_cv2_image = final_annot
             self.display_annotated_image(self.annotated_cv2_image)
-            self.log_message("Image displayed.")
         except Exception as e:
             self.log_message("Error during processing: " + str(e))
             self.log_message(traceback.format_exc())
