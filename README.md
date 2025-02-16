@@ -13,19 +13,13 @@ ErgoApp is a GUI-based tool for assessing workstation posture. It uses MediaPipe
 
 1. **Clone the Repository:**
    ```bash
-   git clone https://your-repository-url.git
-   cd BachelorThesis
+   git clone git@github.com:TomTec94/ML-based-ergonomic-assessment-model.git
    
-
-2. **Create and Activate a Virtual Environment:**
+2. **Install Dependencies:**
    ```bash
    pip install -r requirements.txt
    
-3. **Install Dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   
-4. **Run the Application:**
+3. **Run the Application:**
    ```bash
    python main.py
    
