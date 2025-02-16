@@ -36,7 +36,6 @@ ErgoApp is a GUI-based tool for assessing workstation posture. It uses MediaPipe
    ```bash
       BachelorThesis/
    ├── data/            # Raw and processed images
-   ├── notebooks/       # Jupyter notebooks for EDA
    ├── src/             # Source code (main.py, ui_tool.py, pose_estimation.py, etc.)
    ├── requirements.txt
    └── README.md
