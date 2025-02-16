@@ -1,4 +1,4 @@
-# main.py
+# BachelorThesis/src/main.py
 import logging
 from ui_tool import ErgoApp
 

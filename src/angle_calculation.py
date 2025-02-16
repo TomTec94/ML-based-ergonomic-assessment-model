@@ -1,4 +1,4 @@
-# angle_calculation.py
+# BachelorThesis/src/angle_calculation.py
 import math
 import logging
 
@@ -16,7 +16,6 @@ def compute_2d_angle(a, b, c):
     bx, by = b
     cx, cy = c
 
-    # Vectors BA and BC
     ba = (ax - bx, ay - by)
     bc = (cx - bx, cy - by)
 

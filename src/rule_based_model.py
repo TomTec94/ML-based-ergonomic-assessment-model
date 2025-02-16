@@ -1,12 +1,13 @@
+# BachelorThesis/src/rule_based_model.py
 import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# Updated Configuration dictionary for angle targets and tolerances.
+# Updated configuration dictionary for angle targets and tolerances.
 ANGLE_CONFIG = {
     'knee_angle': {
         'description': "Knee angle",
-        'target': 90,       # Updated target angle in degrees
+        'target': 90,       # Target angle in degrees
         'tolerance': 10,    # Allowed deviation in degrees
         'solutions': [
             "Lower or raise your seat so that the knee is around 90°."

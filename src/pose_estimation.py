@@ -1,4 +1,4 @@
-# pose_estimation.py
+# BachelorThesis/src/pose_estimation.py
 import cv2
 import mediapipe as mp
 import logging
@@ -57,9 +57,6 @@ def extract_landmarks(image_bgr, visualize=False):
         elif r_id not in all_landmarks:
             feedback_msgs.append(f"Right {name} landmark (ID {r_id}) could not be detected; defaulting to LEFT for {name}.")
 
-    # Gather available x-coordinates for symmetric pairs.
-    # For left, consider IDs: 7, 11, 13, 15, 23, 25, 27.
-    # For right, consider IDs: 8, 12, 14, 16, 24, 26, 28.
     left_ids = [7, 11, 13, 15, 23, 25, 27]
     right_ids = [8, 12, 14, 16, 24, 26, 28]
 
@@ -78,16 +75,11 @@ def extract_landmarks(image_bgr, visualize=False):
     else:
         avg_left = sum(left_xs) / len(left_xs)
         avg_right = sum(right_xs) / len(right_xs)
-        # Lower x-value means more to the left.
         if avg_left < avg_right:
             chosen_side = "LEFT"
         else:
             chosen_side = "RIGHT"
         feedback_msgs.append(f"Chosen side based on average x-coordinates: {chosen_side} (Left avg: {avg_left:.3f}, Right avg: {avg_right:.3f})")
 
-    # Do NOT filter out the full dictionary. We return all_landmarks.
-    # Downstream functions will use the chosen_side indicator to select the appropriate keys.
     feedback = "; ".join(feedback_msgs)
     return all_landmarks, image_bgr, feedback
-
-# (No changes in the remainder of the file)

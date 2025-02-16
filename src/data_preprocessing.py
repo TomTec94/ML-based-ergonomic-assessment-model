@@ -1,15 +1,17 @@
+#BachelorThesis/src/data_preprocessing.py
 # data_preprocessing.py
 import os
 import cv2
 import imghdr
 import shutil
 import logging
+import argparse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 def preprocess_images(input_dir, output_dir, min_width=400, min_height=400):
     os.makedirs(output_dir, exist_ok=True)
-    logging.info(f"Starting image-check from '{input_dir}' to '{output_dir}' ...")
+    logging.info(f"Starting image check from '{input_dir}' to '{output_dir}' ...")
     logging.info(f"Required minimum dimensions: {min_width}x{min_height}")
 
     valid_exts = ('.jpg', '.jpeg', '.png')
@@ -26,7 +28,7 @@ def preprocess_images(input_dir, output_dir, min_width=400, min_height=400):
 
         file_type = imghdr.what(in_path)
         if file_type not in ['jpeg', 'png']:
-            logging.warning(f"'{file_name}' - imghdr says '{file_type}', not accepted.")
+            logging.warning(f"'{file_name}' - imghdr returned '{file_type}', not accepted.")
             num_invalid += 1
             continue
 
@@ -50,3 +52,11 @@ def preprocess_images(input_dir, output_dir, min_width=400, min_height=400):
     logging.info("=== Processing Completed ===")
     logging.info(f"Copied images: {num_copied}")
     logging.info(f"Invalid/skipped files: {num_invalid}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Preprocess images from input directory and save valid images to output directory.")
+    parser.add_argument("input_dir", help="Directory containing raw images")
+    parser.add_argument("output_dir", help="Directory where processed images will be saved")
+    args = parser.parse_args()
+
+    preprocess_images(args.input_dir, args.output_dir)

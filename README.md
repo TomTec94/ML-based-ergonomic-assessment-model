@@ -32,7 +32,11 @@ ErgoApp is a GUI-based tool for assessing workstation posture. It uses MediaPipe
 ## Usage
 	•	Load Image: Drag and drop a side-view image (JPG/JPEG/PNG) into the GUI.
 	•	Adjust Thresholds: Use the provided form to modify target angles and tolerances.
+	•	Choose the side of the picture via the drop down menu
 	•	View Results: The application displays annotated images and a text summary with an overall assessment.
+
+## Just run the preprocessing piplenine
+    python src/data_preprocessing.py data/raw_images data/processed
 
 ## Project Structure
    ```bash
